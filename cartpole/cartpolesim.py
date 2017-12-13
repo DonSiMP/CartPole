@@ -106,18 +106,18 @@ class CartPoleSim(object):
                 if k == '.': disturb[0] += 0.5
                 elif k == ',': disturb[0] -= 0.5
                 elif k == ' ': disturb[0] = 0.0
+                elif k == 'v': recenter()
                 elif k == 'r':
                     t[0] = 0.0
                     q[0] = np.copy(q0)
                     disturb[0] = 0.0
                     print "User triggered reset!"
-                    #recenter()
                     reset[0] = True
                     start_time[0] = time.time()
             fig.scene._vtk_control.keyPressEvent = keyPressEvent
             print "--\nUSER KEYBOARD CONTROLS:"
             print "Increment / decrement disturbance cart-force with '>' / '<' and cancel disturbance with ' ' (spacebar)."
-            print "Reset simulation with 'r'.\n--"
+            print "Reset view with 'v'. Reset simulation with 'r'.\n--"
             print "(close all Mayavi windows to continue...)"
 
             # Wrap simulation in animation
