@@ -63,7 +63,7 @@ class CartPoleOpt(object):
             return kp[1]*err - kd[1]*q[3]
         return control
 
-    def make_trajectory(self, q0, qN, tN, H, plot=False, verbosity=0):
+    def make_trajectory(self, q0, qN, tN, H, rush=0.0, plot=False, verbosity=0):
         """
         Returns a time-grid, input timeseries, and state timeseries that
         execute an energy-optimal cart-pole trajectory between two states.
@@ -73,10 +73,12 @@ class CartPoleOpt(object):
         qN:        array ending state at time tN
         tN:        scalar final time
         H:         tuple of discretization step-sizes in descending order
+        rush:      scalar (0 to 1) that scales-up error weight compared to effort weight
         plot:      bool for if intermediate solutions should be plotted (requires MatPlotLib)
         verbosity: integer (0 to 12) for print level of IPOPT
 
         """
+        rush = np.clip(rush, 0.0, 1.0)
         if plot: from matplotlib import pyplot
 
         # Solve transcribed optimization problem for increasingly refined time grids
@@ -93,7 +95,7 @@ class CartPoleOpt(object):
                     Q[:, i] = np.linspace(q0[i], qN[i], N)
             else:
                 U = interp1d(T_prev, U, kind="linear", assume_sorted=True, axis=0)(T)
-                Q = interp1d(T_prev, Q, kind="quadratic", assume_sorted=True, axis=0)(T) # ??? can use Qdot info
+                Q = interp1d(T_prev, Q, kind="quadratic", assume_sorted=True, axis=0)(T) # ??? should use Qdot for accuracy
                 L = interp1d(T_prev[:-1], L, kind="quadratic", assume_sorted=True, axis=0,
                              bounds_error=False, fill_value="extrapolate")(T[:-1])
             if grid_number < len(H)-1: T_prev = T
@@ -108,7 +110,7 @@ class CartPoleOpt(object):
 
             # Configure and call IPOPT
             nlp = ipopt.problem(n=len(x), m=len(c_eq),
-                                problem_obj=self._Problem(self.dyn, N, h, qN),
+                                problem_obj=self._Problem(self.dyn, N, h, qN, rush),
                                 lb=x_lower, ub=x_upper, cl=c_eq, cu=c_eq)
             nlp.addOption("tol", self.tol)
             nlp.addOption("max_iter", self.max_iter)
@@ -144,15 +146,18 @@ class CartPoleOpt(object):
         subject to dynamics collocation constraints.
 
         """
-        def __init__(self, dyn, N, h, qN):
+        def __init__(self, dyn, N, h, qN, rush):
             self.dyn = dyn
             self.N = int(N)
             self.h = np.float64(h)
-            self.qN = np.array(qN, dtype=np.float64)  # ??? use this in objective (and gradient)
+            self.qN = np.array(qN, dtype=np.float64)
+            self.rush = np.float64(rush)
 
             # Initialize static memory for large arrays
             len_x = self.N*(1+4)
+            self.E = np.zeros((self.N, 4), dtype=np.float64)
             self.U2 = np.zeros(self.N, dtype=np.float64)
+            self.E2 = np.zeros(self.N, dtype=np.float64)
             self.Qdot = np.zeros((self.N, 4), dtype=np.float64)
             self.AA = np.zeros((self.N, 4, 4), dtype=np.float64)
             self.BB = np.zeros((self.N, 4, 1), dtype=np.float64)
@@ -172,14 +177,18 @@ class CartPoleOpt(object):
 
             """
             self.U2[:] = x[:self.N]**2
-            return (self.h/2) * (self.U2[0] + 2*np.sum(self.U2[1:-1]) + self.U2[-1])
+            self.E2[:] = np.sum((x[self.N:].reshape(self.N, 4) - self.qN)**2, axis=1)
+            return (self.h/2) * ((1-self.rush)*(self.U2[0] + 2*np.sum(self.U2[1:-1]) + self.U2[-1]) +
+                                 self.rush*(self.E2[0] + 2*np.sum(self.E2[1:-1]) + self.E2[-1]))
 
         def gradient(self, x):
             """
             Gradient of the objective function.
 
             """
-            return self.h * np.concatenate(([x[0]], 2*x[1:self.N-1], [x[self.N-1]], np.zeros((self.N*4))))
+            self.E[:] = x[self.N:].reshape(self.N, 4) - self.qN
+            return self.h * np.concatenate(([(1-self.rush)*x[0]], 2*(1-self.rush)*x[1:self.N-1], [(1-self.rush)*x[self.N-1]],
+                                            self.rush*self.E[0], 2*self.rush*self.E[1:-1].ravel(), self.rush*self.E[-1]))
 
         def constraints(self, x):
             """
