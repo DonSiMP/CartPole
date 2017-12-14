@@ -116,7 +116,8 @@ class CartPoleSim(object):
                     start_time[0] = time.time()
             fig.scene._vtk_control.keyPressEvent = keyPressEvent
             print "--\nUSER KEYBOARD CONTROLS:"
-            print "Increment / decrement disturbance cart-force with '>' / '<' and cancel disturbance with ' ' (spacebar)."
+            if override is None:
+                print "Increment / decrement disturbance cart-force with '>' / '<' and cancel disturbance with ' ' (spacebar)."
             print "Reset view with 'v'. Reset simulation with 'r'.\n--"
             print "(close all Mayavi windows to continue...)"
 
