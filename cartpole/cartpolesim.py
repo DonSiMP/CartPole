@@ -45,7 +45,7 @@ class CartPoleSim(object):
             start_time = time.time()
 
             # Run timeseries simulation and store results
-            T = np.arange(0, tN, dt)
+            T = np.arange(0, tN+dt, dt)
             Q = np.zeros((len(T), 4), dtype=np.float64)
             U = np.zeros((len(T), 1), dtype=np.float64)
             Q[0] = np.copy(q0)
