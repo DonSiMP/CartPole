@@ -19,14 +19,14 @@ class CartPoleOpt(object):
     An interior-point method is used to solve the nonlinear program.
 
     dyn:      CartPoleDyn object
+    tol:      float nonlinear-program solver convergence tolerance
     max_iter: integer maximum number of IPOPT iterations per optimization
-    tol:      solver convergence tolerance
     
     """
-    def __init__(self, dyn, max_iter=100, tol=1E-6):
+    def __init__(self, dyn, tol=1E-6, max_iter=100):
         self.dyn = dyn
-        self.max_iter = int(max_iter)
         self.tol = float(tol)
+        self.max_iter = int(max_iter)
 
         # For converting a trajectory (U, Q) to and from a solution vector x
         self.traj_from_x = lambda x, N: (x[:N].reshape(N, 1), x[N:].reshape(N, 4))
@@ -63,18 +63,22 @@ class CartPoleOpt(object):
             return kp[1]*err - kd[1]*q[3]
         return control
 
-    def make_trajectory(self, q0, qN, tN, H, plot=False):
+    def make_trajectory(self, q0, qN, tN, H, plot=False, verbosity=0):
         """
         Returns a time-grid, input timeseries, and state timeseries that
         execute an energy-optimal cart-pole trajectory between two states.
+        Also returns optimizer success bool.
 
-        q0:   array starting state
-        qN:   array ending state at time tN
-        tN:   scalar final time
-        H:    tuple of discretization step-sizes in descending order
-        plot: bool for if intermediate solutions should be plotted (requires MatPlotLib)
+        q0:        array starting state
+        qN:        array ending state at time tN
+        tN:        scalar final time
+        H:         tuple of discretization step-sizes in descending order
+        plot:      bool for if intermediate solutions should be plotted (requires MatPlotLib)
+        verbosity: integer (0 to 12) for print level of IPOPT
 
         """
+        if plot: from matplotlib import pyplot
+
         # Solve transcribed optimization problem for increasingly refined time grids
         for grid_number, h in enumerate(H):
             T = np.arange(0, tN+h, h, dtype=np.float64)
@@ -84,16 +88,16 @@ class CartPoleOpt(object):
             if grid_number == 0:
                 U = np.zeros((N, 1), dtype=np.float64)
                 Q = np.zeros((N, 4), dtype=np.float64)
+                L = np.zeros((N-1, 4), dtype=np.float64)  # costates
                 for i in xrange(4):
                     Q[:, i] = np.linspace(q0[i], qN[i], N)
             else:
-                U[:], Q[:] = self.traj_from_x(x, N_prev)
                 U = interp1d(T_prev, U, kind="linear", assume_sorted=True, axis=0)(T)
                 Q = interp1d(T_prev, Q, kind="quadratic", assume_sorted=True, axis=0)(T) # ??? can use Qdot info
+                L = interp1d(T_prev[:-1], L, kind="quadratic", assume_sorted=True, axis=0,
+                             bounds_error=False, fill_value="extrapolate")(T[:-1])
+            if grid_number < len(H)-1: T_prev = T
             x = self.x_from_traj(U, Q)
-            if grid_number < len(H)-1:
-                T_prev = np.copy(T)
-                N_prev = N
 
             # Generate constraint and solution bounds
             c_eq = np.zeros((N-1)*4)
@@ -103,37 +107,34 @@ class CartPoleOpt(object):
                                       [self.dyn.rail_lims[1], self.inf, self.inf, self.inf]*(N-2), qN))
 
             # Configure and call IPOPT
-            nlp = ipopt.problem(n=len(x), m=len(c_eq), problem_obj=self._Problem(self.dyn, N, h),
+            nlp = ipopt.problem(n=len(x), m=len(c_eq),
+                                problem_obj=self._Problem(self.dyn, N, h, qN),
                                 lb=x_lower, ub=x_upper, cl=c_eq, cu=c_eq)
-            nlp.setProblemScaling(obj_scaling=h)
-            nlp.addOption("nlp_scaling_method", "user-scaling")
-            nlp.addOption("max_iter", self.max_iter)
             nlp.addOption("tol", self.tol)
+            nlp.addOption("max_iter", self.max_iter)
+            nlp.addOption("sb", "yes")
+            nlp.addOption("print_level", verbosity)
             nlp.addOption("print_frequency_iter", self.max_iter)
-            x[:], info = nlp.solve(x)
+            nlp.addOption("warm_start_init_point", "yes")
+            nlp.addOption("warm_start_bound_push", 100*self.tol)
+            nlp.addOption("warm_start_mult_bound_push", 100*self.tol)
+            nlp.addOption("mu_init", 100*self.tol)
+            nlp.addOption("mu_strategy", "adaptive")
+            nlp.addOption("nlp_scaling_method", "user-scaling")
+            nlp.setProblemScaling(obj_scaling=h)
+            print "Making optimal trajectory with dt = {}...".format(h)
+            x[:], info = nlp.solve(x, lagrange=L.ravel())
             print "--------------------"
 
-            # Plot intermediate result
+            # Extract trajectory from solution
+            U[:], Q[:] = self.traj_from_x(x, N)
+            L[:] = np.reshape(info["mult_g"], (N-1, 4))
             if plot:
-                from matplotlib import pyplot
-                Uplt, Qplt = self.traj_from_x(x, N)
-                pyplot.plot(T, Qplt[:, 0], "k", label="pos")
-                pyplot.plot(T, Qplt[:, 1], "b", label="ang")
-                pyplot.plot(T, Qplt[:, 2], "m", label="vel")
-                pyplot.plot(T, Qplt[:, 3], "c", label="angvel")
-                pyplot.plot(T, Uplt[:, 0], "r", label="input")
-                pyplot.xlim([T[0], T[-1]])
-                pyplot.legend(fontsize=16)
-                pyplot.xlabel("Time", fontsize=16)
-                pyplot.title("Solution for h = {}".format(h), fontsize=16)
-                pyplot.grid(True)
-                print "Showing intermediate optimization result..."
-                print "(close plot to continue)"
-                pyplot.show()  # blocking
+                self._plot(T, Q, U, L, h, pyplot)
+                print "--------------------"
 
-        # Return trajectory
-        U[:], Q[:] = self.traj_from_x(x, N)
-        return T, U, Q
+        # Return grid, trajectory, and success bool
+        return T, U, Q, (not bool(info["status"]))
 
     class _Problem(object):
         """
@@ -143,10 +144,11 @@ class CartPoleOpt(object):
         subject to dynamics collocation constraints.
 
         """
-        def __init__(self, dyn, N, h):
+        def __init__(self, dyn, N, h, qN):
             self.dyn = dyn
             self.N = int(N)
             self.h = np.float64(h)
+            self.qN = np.array(qN, dtype=np.float64)  # ??? use this in objective (and gradient)
 
             # Initialize static memory for large arrays
             len_x = self.N*(1+4)
@@ -242,3 +244,28 @@ class CartPoleOpt(object):
 
         #     """
         #     print("Objective value at iteration #%d is - %g" % (iter_count, obj_value))
+
+    def _plot(self, T, Q, U, L, h, pyplot):
+        fig = pyplot.figure()
+        ax = fig.add_subplot(2, 1, 1)
+        ax.set_ylabel("Solution", fontsize=16)
+        ax.plot(T, Q[:, 0], "k", label="pos")
+        ax.plot(T, Q[:, 1], "b", label="ang")
+        ax.plot(T, Q[:, 2], "m", label="vel")
+        ax.plot(T, Q[:, 3], "c", label="angvel")
+        ax.plot(T, U[:, 0], "r", label="input")
+        ax.set_xlim([T[0], T[-1]])
+        ax.legend(fontsize=16)
+        ax.grid(True)
+        ax = fig.add_subplot(2, 1, 2)
+        ax.set_ylabel("Costates", fontsize=16)
+        ax.set_xlabel("Time (dt = {})".format(h), fontsize=16)
+        ax.plot(T[:-1], L[:, 0], "k", label="l_pos")
+        ax.plot(T[:-1], L[:, 1], "b", label="l_ang")
+        ax.plot(T[:-1], L[:, 2], "m", label="l_vel")
+        ax.plot(T[:-1], L[:, 3], "c", label="l_angvel")
+        ax.set_xlim([T[0], T[-1]])
+        ax.grid(True)
+        print "Showing intermediate optimization result..."
+        print "(close plot to continue)"
+        pyplot.show()  # blocking
