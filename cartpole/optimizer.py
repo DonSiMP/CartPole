@@ -2,7 +2,7 @@
 Optimal control setup for a cart-pole system.
 This requires cyipopt, a Python wrapper for IPOPT (https://github.com/matthias-k/cyipopt).
 Of course, IPOPT itself is necessary too (https://github.com/coin-or/Ipopt).
-See CartPoleOpt class docstring for more details.
+See Optimizer class docstring for more details.
 
 """
 from __future__ import division
@@ -12,16 +12,16 @@ from scipy.linalg import block_diag
 import ipopt
 
 
-class CartPoleOpt(object):
+class Optimizer(object):
     """
     Class for the optimal controller of a cart-pole system.
     Transcription method is trapezoidal direct collocation.
     IPOPT's interior-point method is used to solve the nonlinear program.
 
-    dyn:       CartPoleDyn object
+    dyn:       cartpole.Dynamics object
     tol:       float nonlinear-program solver convergence tolerance
     max_iter:  integer maximum number of IPOPT iterations per optimization
-    verbosity: integer (-1 to 12) for print level of IPOPT (-1 silences cartpoleopt too)
+    verbosity: integer (-1 to 12) for print level of IPOPT (-1 silences Optimizer too)
     
     """
     def __init__(self, dyn, tol=1E-6, max_iter=100, verbosity=0):

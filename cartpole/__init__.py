@@ -1,3 +1,3 @@
-from cartpoledyn import CartPoleDyn
-from cartpolesim import CartPoleSim
-from cartpoleopt import CartPoleOpt
+from dynamics import Dynamics
+from optimizer import Optimizer
+from simulator import Simulator

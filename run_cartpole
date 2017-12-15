@@ -6,12 +6,12 @@ Script to run the cartpole demo.
 from __future__ import division
 import numpy as np; npl = np.linalg
 from scipy.interpolate import interp1d
-from cartpole import CartPoleDyn, CartPoleSim, CartPoleOpt
+import cartpole
 import time
 
 # Set-up dynamics and optimal controller
-dyn = CartPoleDyn()
-opt = CartPoleOpt(dyn)
+dyn = cartpole.Dynamics()
+opt = cartpole.Optimizer(dyn)
 
 # Frame problem
 q0 = [0, 0, 0, 0]
@@ -39,5 +39,5 @@ if override:
                         axis=0, bounds_error=False, fill_value=Qopt[-1])
 
 # Set-up simulator and run
-sim = CartPoleSim(dyn)
+sim = cartpole.Simulator(dyn)
 sim.simulate(q0, control, tN=0, dt=dt, goal=goal, override=override)

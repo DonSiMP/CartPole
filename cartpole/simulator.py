@@ -1,6 +1,6 @@
 """
 Simulation setup of a cart-pole system.
-See CartPoleSim class docstring for more details.
+See Simulator class docstring for more details.
 
 """
 from __future__ import division
@@ -8,13 +8,13 @@ import numpy as np; npl = np.linalg
 import time
 
 
-class CartPoleSim(object):
+class Simulator(object):
     """
     Class for simulation setup of a cart-pole system.
     Faster-than-realtime timeseries simulation requires MatPlotLib for plotting.
     Realtime simulation requires Mayavi for graphics. (http://docs.enthought.com/mayavi/mayavi/installation.html)
 
-    dyn: CartPoleDyn object
+    dyn: cartpole.Dynamics object
 
     """
     def __init__(self, dyn):

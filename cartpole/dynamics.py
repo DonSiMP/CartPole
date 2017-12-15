@@ -1,13 +1,13 @@
 """
 Dynamics setup of a cart-pole system.
-See CartPoleDyn class docstring for more details.
+See Dynamics class docstring for more details.
 
 """
 from __future__ import division
 import numpy as np; npl = np.linalg
 
 
-class CartPoleDyn(object):
+class Dynamics(object):
     """
     Class for the dynamics of a cart-pole system.
     State: q == [pos, ang, vel, angvel]
@@ -40,7 +40,7 @@ class CartPoleDyn(object):
         U = np.random.sample((3, 1))
         for q, u, qdot in zip(Q, U, self.F(Q, U)):
             if not np.array_equal(self.f(q, u), qdot):
-                raise AssertionError("Invalid CartPoleDyn class source-code; f and F definitions don't correspond!")
+                raise AssertionError("Invalid Dynamics class source-code; f and F definitions don't correspond!")
 
     def step(self, q, u, dt, disturb=0.0):
         """
