@@ -16,17 +16,21 @@ class CartPoleOpt(object):
     """
     Class for the optimal controller of a cart-pole system.
     Transcription method is trapezoidal direct collocation.
-    An interior-point method is used to solve the nonlinear program.
+    IPOPT's interior-point method is used to solve the nonlinear program.
 
-    dyn:      CartPoleDyn object
-    tol:      float nonlinear-program solver convergence tolerance
-    max_iter: integer maximum number of IPOPT iterations per optimization
+    dyn:       CartPoleDyn object
+    tol:       float nonlinear-program solver convergence tolerance
+    max_iter:  integer maximum number of IPOPT iterations per optimization
+    verbosity: integer (-1 to 12) for print level of IPOPT (-1 silences cartpoleopt too)
     
     """
-    def __init__(self, dyn, tol=1E-6, max_iter=100):
+    def __init__(self, dyn, tol=1E-6, max_iter=100, verbosity=0):
         self.dyn = dyn
         self.tol = float(tol)
         self.max_iter = int(max_iter)
+        self.verbosity = int(np.clip(verbosity, 0, 12))
+        if verbosity < 0: self.opt_prints = False
+        else: self.opt_prints = True
 
         # For converting a trajectory (U, Q) to and from a solution vector x
         self.traj_from_x = lambda x, N: (x[:N].reshape(N, 1), x[N:].reshape(N, 4))
@@ -63,19 +67,18 @@ class CartPoleOpt(object):
             return kp[1]*err - kd[1]*q[3]
         return control
 
-    def make_trajectory(self, q0, qN, tN, H, rush=0.0, plot=False, verbosity=0):
+    def make_trajectory(self, q0, qN, tN, H, rush=0.0, plot=False):
         """
         Returns a time-grid, input timeseries, and state timeseries that
         execute an energy-optimal cart-pole trajectory between two states.
         Also returns optimizer success bool.
 
-        q0:        array starting state
-        qN:        array ending state at time tN
-        tN:        scalar final time
-        H:         tuple of discretization step-sizes in descending order
-        rush:      scalar (0 to 1) that scales-up error weight compared to effort weight
-        plot:      bool for if intermediate solutions should be plotted (requires MatPlotLib)
-        verbosity: integer (0 to 12) for print level of IPOPT
+        q0:   array starting state
+        qN:   array ending state at time tN
+        tN:   scalar final time
+        H:    tuple of discretization step-sizes in descending order
+        rush: scalar (0 to 1) that scales-up error weight compared to effort weight
+        plot: bool for if intermediate solutions should be plotted (requires MatPlotLib)
 
         """
         rush = np.clip(rush, 0.0, 1.0)
@@ -115,7 +118,7 @@ class CartPoleOpt(object):
             nlp.addOption("tol", self.tol)
             nlp.addOption("max_iter", self.max_iter)
             nlp.addOption("sb", "yes")
-            nlp.addOption("print_level", verbosity)
+            nlp.addOption("print_level", self.verbosity)
             nlp.addOption("print_frequency_iter", self.max_iter)
             nlp.addOption("warm_start_init_point", "yes")
             nlp.addOption("warm_start_bound_push", 100*self.tol)
@@ -124,16 +127,15 @@ class CartPoleOpt(object):
             nlp.addOption("mu_strategy", "adaptive")
             nlp.addOption("nlp_scaling_method", "user-scaling")
             nlp.setProblemScaling(obj_scaling=h)
-            print "Making optimal trajectory with dt = {}...".format(h)
+            if self.opt_prints: print "Making optimal trajectory with dt = {}...".format(h)
+            # nlp.addOption("derivative_test", "first-order")  # for debug only
             x[:], info = nlp.solve(x, lagrange=L.ravel())
-            print "--------------------"
+            if self.opt_prints: print "--------------------"
 
             # Extract trajectory from solution
             U[:], Q[:] = self.traj_from_x(x, N)
             L[:] = np.reshape(info["mult_g"], (N-1, 4))
-            if plot:
-                self._plot(T, Q, U, L, h, pyplot)
-                print "--------------------"
+            if plot: self._plot(T, Q, U, L, h, pyplot)
 
         # Return grid, trajectory, and success bool
         return T, U, Q, (not bool(info["status"]))
@@ -164,12 +166,25 @@ class CartPoleOpt(object):
             self.dFdx = np.zeros((self.N*4, len_x), dtype=np.float64)
             self.dcdx = np.zeros(((self.N-1)*4, len_x), dtype=np.float64)
 
-            # For handling jacobian sparsity
-            Q_extractor = np.eye(len_x, dtype=np.float64)[self.N*1:]
+            # Analyze jacobian sparsity
+            xtest = 20*(np.random.sample(len_x)-0.5)
+            self.AA[:], self.BB[:] = self.dyn.linearize(xtest[self.N:].reshape(self.N, 4), xtest[:self.N].reshape(self.N, 1))
+            self.BB_idx = self.BB.nonzero()
+            self.AA_idx = self.AA.nonzero()
+            self.dFdx[:] = np.hstack((block_diag(*self.BB), block_diag(*self.AA)))
+            self.dFdx_Bidx = self.dFdx[:, :self.N].nonzero()
+            self.dFdx_Aidx = self.dFdx[:, self.N:].nonzero()
+            self.dFdx_lidx = self.dFdx[:-4].nonzero()
+            self.dFdx_ridx = self.dFdx[4:].nonzero()
+            Q_extractor = np.eye(len_x, dtype=np.int32)[self.N:]
             Q_diffmat = Q_extractor[:-4] - Q_extractor[4:]
-            self.jac_sum_idx = Q_diffmat.nonzero()
-            self.Q_diffarr = Q_diffmat[self.jac_sum_idx]
-            self.jac_rows, self.jac_cols = self._dense_jacobian(20*(np.random.sample(len_x)-0.5)).reshape(((self.N-1)*4, len_x)).nonzero()
+            Q_diffmat_idx = Q_diffmat.nonzero()
+            self.Q_diffarr_l = Q_diffmat[self.dFdx_lidx].astype(np.float64)
+            self.Q_diffarr_r = Q_diffmat[self.dFdx_ridx].astype(np.float64)
+            self.dcdx[self.dFdx_lidx] = self.dFdx[:-4][self.dFdx_lidx]
+            self.dcdx[self.dFdx_ridx] = self.dFdx[4:][self.dFdx_ridx]
+            self.dcdx[Q_diffmat_idx] += Q_diffmat[Q_diffmat_idx]  # important: this actually sets certain nonzero constants in dcdx
+            self.jac_rows, self.jac_cols = self.dcdx.nonzero()
 
         def objective(self, x):
             """
@@ -200,33 +215,23 @@ class CartPoleOpt(object):
             self.Qdot[:] = self.dyn.F(Q, U)
             return ((self.h/2)*(self.Qdot[:-1] + self.Qdot[1:]) + (Q[:-1] - Q[1:])).ravel()
 
-        def _dense_jacobian(self, x):
+        def jacobian(self, x):
             """
-            Returns the full jacobian of the constraints function.
-            This is used only to analyze the sparsity of the problem.
+            Returns the jacobian of the constraints as a row-major-flattened
+            array of its nonzero values.
 
             """
             self.AA[:], self.BB[:] = self.dyn.linearize(x[self.N:].reshape(self.N, 4), x[:self.N].reshape(self.N, 1))
-            self.dFdx[:] = np.hstack((block_diag(*self.BB), block_diag(*self.AA)))
-            self.dcdx[:] = (self.h/2)*(self.dFdx[:-4] + self.dFdx[4:])
-            self.dcdx[self.jac_sum_idx] += self.Q_diffarr
-            return self.dcdx
-
-        def jacobian(self, x): # ??? not sparsed enough
-            """
-            Returns a row-major-flattened version of _dense_jacobian at
-            only the nonzero entries.
-
-            """
-            self.AA[:], self.BB[:] = self.dyn.linearize(x[self.N:].reshape(self.N, 4), x[:self.N].reshape(self.N, 1))
-            self.dFdx[:] = np.hstack((block_diag(*self.BB), block_diag(*self.AA)))
-            self.dcdx[:] = (self.h/2)*(self.dFdx[:-4] + self.dFdx[4:])
-            self.dcdx[self.jac_sum_idx] += self.Q_diffarr
+            self.dFdx[self.dFdx_Bidx] = self.BB[self.BB_idx]
+            self.dFdx[:, self.N:][self.dFdx_Aidx] = self.AA[self.AA_idx]
+            self.dcdx[self.dFdx_lidx] = (self.h/2)*self.dFdx[:-4][self.dFdx_lidx] + self.Q_diffarr_l
+            self.dcdx[self.dFdx_ridx] = (self.h/2)*self.dFdx[4:][self.dFdx_ridx] + self.Q_diffarr_r
             return self.dcdx[self.jac_rows, self.jac_cols]
 
         def jacobianstructure(self):
             """
-            Returns the (rows, columns) indices where _dense_jacobian is nonzero.
+            Returns the (rows, columns) indices where the full jacobian of
+            the constraints is nonzero.
 
             """
             return (self.jac_rows, self.jac_cols)
@@ -278,3 +283,4 @@ class CartPoleOpt(object):
         print "Showing intermediate optimization result..."
         print "(close plot to continue)"
         pyplot.show()  # blocking
+        print "--------------------"
