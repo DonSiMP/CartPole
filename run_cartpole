@@ -11,7 +11,7 @@ import time
 
 # Set-up dynamics and optimal controller
 dyn = cartpole.Dynamics()
-opt = cartpole.Optimizer(dyn)
+opt = cartpole.Optimizer(dyn, verbosity=5)
 
 # Frame problem
 q0 = [0, 0, 0, 0]
@@ -32,7 +32,7 @@ print "TOTAL TIME TAKEN BY OPTIMIZATION: {}".format(np.round(time.time() - opt_s
 print "----------------------------------------\n"
 
 # Look at ideal plan or simulate its execution?
-override = True  # True or None
+override = None  # True or None
 if override:
     print "(visualizing ideal scenario)"
     override = interp1d(Topt, Qopt, kind="quadratic", assume_sorted=True,

@@ -24,7 +24,7 @@ class Optimizer(object):
     verbosity: integer (-1 to 12) for print level of IPOPT (-1 silences Optimizer too)
     
     """
-    def __init__(self, dyn, tol=1E-6, max_iter=100, verbosity=0):
+    def __init__(self, dyn, tol=1E-6, max_iter=500, verbosity=0):
         self.dyn = dyn
         self.tol = float(tol)
         self.max_iter = int(max_iter)
